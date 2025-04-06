@@ -23,7 +23,8 @@ jobs:
 
       - name: Install markdown-tool
         run: |
-          cargo install --git https://github.com/eugenescodes/markdown-tool
+          # cargo install --git https://github.com/eugenescodes/markdown-tool
+          cargo install --path .
 
       - name: Check Markdown files
         run: |
