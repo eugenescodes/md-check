@@ -1,0 +1,40 @@
+name: 'Markdown Checker'
+description: 'Checks markdown files for broken links and style issues'
+author: 'eugenescodes'
+
+inputs:
+  files:
+    description: 'Files or patterns to check'
+    required: false
+    default: '**.md'
+  config:
+    description: 'Path to config file'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        profile: minimal
+
+    - name: Install markdown-tool
+      shell: bash
+      run: |
+        cargo install --git https://github.com/eugenescodes/markdown-tool
+
+    - name: Check Markdown files
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.config }}" ]; then
+          find . -name "${{ inputs.files }}" -type f -exec markdown-tool lint --config ${{ inputs.config }} {} \;
+        else
+          find . -name "${{ inputs.files }}" -type f -exec markdown-tool lint {} \;
+        fi
+
+branding:
+  icon: 'book-open'
+  color: 'blue'
