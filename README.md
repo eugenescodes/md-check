@@ -25,37 +25,37 @@ Install on local machine:
 ### Building from source
 
 ```bash
-git clone https://github.com/yourusername/markdown-tool
-cd markdown-tool
+git clone https://github.com/yourusername/md-check
+cd md-check
 cargo build --release
 ```
 
-The compiled binary will be available at target/release/markdown-tool
+The compiled binary will be available at target/release/md-check
 
 ## Examples for use
 
 ```bash
 # Check a single file
 
-markdown-tool README.md
+md-check README.md
 
 # Check multiple files
 
-markdown-tool file1.md file2.md
+md-check file1.md file2.md
 
 # Check all markdown files in a directory
 
-markdown-tool .
+md-check .
 or
-markdown-tool ./folder_name/
+md-check ./folder_name/
 
 # Check multiple directories
 
-markdown-tool ./folder_name_1/ ./folder_name_2/
+md-check ./folder_name_1/ ./folder_name_2/
 
 # Skip link checking
 
-markdown-tool --skip-links README.md
+md-check --skip-links README.md
 ```
 
 Output
@@ -90,10 +90,10 @@ To run tool as part of a pre-commit workflow, add `.pre-commit-config.yaml` to y
 
 ```bash
 repos:
-  - repo: https://github.com/eugenescodes/markdown-tool
+  - repo: https://github.com/eugenescodes/md-check
     rev: main
     hooks:
-      - id: markdown-tool
+      - id: md-check
 ```
 
 ## Use with action
@@ -102,10 +102,10 @@ repos:
 
 ```bash
 mkdir -p .github/workflows
-touch .github/workflows/markdown-check.yml
+touch .github/workflows/md-check.yml
 ```
 
-- add below code to `.github/workflows/markdown-check.yml`
+- add below code to `.github/workflows/md-check.yml`
 
 ```bash
 name: Check Markdown
@@ -126,7 +126,7 @@ jobs:
       - uses: actions/checkout@v3
       
       - name: Check Markdown
-        uses: eugenescodes/markdown-tool@main
+        uses: eugenescodes/md-check@main
 
 ```
 
