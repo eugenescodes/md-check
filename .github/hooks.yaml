@@ -1,6 +1,6 @@
-- id: markdown-tool
-  name: markdown-tool
+- id: md-check
+  name: md-check
   description: Check markdown files for broken links and style issues
-  entry: markdown-tool
+  entry: md-check
   language: rust
   files: \.md$

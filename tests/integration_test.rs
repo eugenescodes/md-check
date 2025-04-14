@@ -9,7 +9,7 @@ fn test_cli_no_files() -> Result<(), Box<dyn Error>> {
     let temp_dir = TempDir::new()?;
     let empty_dir = temp_dir.path();
 
-    let mut cmd = Command::cargo_bin("markdown-tool")?;
+    let mut cmd = Command::cargo_bin("md-check")?;
     cmd.arg(empty_dir)
         .assert()
         .success()
@@ -28,7 +28,7 @@ fn test_multiple_files() -> Result<(), Box<dyn Error>> {
     fs::write(&file1_path, "# Valid markdown 1")?;
     fs::write(&file2_path, "# Valid markdown 2")?;
 
-    let mut cmd = Command::cargo_bin("markdown-tool")?;
+    let mut cmd = Command::cargo_bin("md-check")?;
     cmd.arg(temp_dir.path())
         .assert()
         .success()
@@ -43,7 +43,7 @@ fn test_skip_links_flag() -> Result<(), Box<dyn Error>> {
     let file_path = temp_dir.path().join("test.md");
     fs::write(&file_path, "[Test](https://example.com)")?;
 
-    let mut cmd = Command::cargo_bin("markdown-tool")?;
+    let mut cmd = Command::cargo_bin("md-check")?;
     cmd.arg(&file_path)
         .arg("--skip-links")
         .assert()
@@ -59,7 +59,7 @@ fn test_skip_links_flag() -> Result<(), Box<dyn Error>> {
 
 #[test]
 fn test_invalid_file_path() -> Result<(), Box<dyn Error>> {
-    let mut cmd = Command::cargo_bin("markdown-tool")?;
+    let mut cmd = Command::cargo_bin("md-check")?;
     cmd.arg("nonexistent.md")
         .assert()
         .success()
