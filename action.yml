@@ -33,7 +33,7 @@ runs:
         set -x
         
         if [[ "${{ inputs.skip_links }}" == "true" ]]; then
-          find . -name "${{ inputs.files }}" -type f -exec md-check --skip-links {} \;
+          find . -name "${{ inputs.files }}" -type f -exec md-check --skip-links --verbose {} \;
         else
-          find . -name "${{ inputs.files }}" -type f -exec md-check {} \;
+          find . -name "${{ inputs.files }}" -type f -exec md-check --verbose {} \;
         fi
