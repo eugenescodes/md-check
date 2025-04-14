@@ -1,8 +1,9 @@
 use colored::*;
+use futures::stream::{self, StreamExt};
 use pulldown_cmark::{Event, Parser, Tag};
 use reqwest::{Client, StatusCode, redirect::Policy};
-use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use url::Url;
 
@@ -39,6 +40,8 @@ pub fn extract_links(content: &str, file_path: &Path) -> Vec<LinkInfo> {
     links
 }
 
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
+
 pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
     let client = Client::builder()
         .redirect(Policy::limited(10))
@@ -51,51 +54,50 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
         .unwrap_or_default();
 
     let total_links = links.len();
-    let mut results = Vec::new();
-
     println!("\n{} {} links to check", "Total:".bold(), total_links);
 
-    for (index, link) in links.into_iter().enumerate() {
-        let current = index + 1;
-        print!(
-            "\r{} [{}/{}] {}",
-            "Checking".cyan(),
-            current,
-            total_links,
-            link.url
-        );
-        std::io::stdout().flush().unwrap_or_default();
+    // Add counter for progress
+    let _counter = std::sync::atomic::AtomicUsize::new(0);
 
-        let result = check_single_link(&client, link.clone()).await;
+    COUNTER.store(0, Ordering::SeqCst);
 
-        print!("\r{}", " ".repeat(100));
-        print!("\r");
+    let results = stream::iter(links)
+        .map(|link| {
+            {
+                let client = client.clone();
+                async move {
+                    // println!("Checking link: {}", link.url.cyan());
 
-        let status_str = match result.status.as_u16() {
-            200..=299 => result.status.to_string().green(),
-            300..=399 => result.status.to_string().yellow(),
-            400..=499 => result.status.to_string().red(),
-            _ => result.status.to_string().red().bold(),
-        };
+                    let result = check_single_link(&client, link.clone()).await;
+                    let current = COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
 
-        println!(
-            "[{}/{}] {} - {} - {}",
-            current,
-            total_links,
-            status_str,
-            if result.status.is_success() {
-                "GOOD".green()
-            } else {
-                "FAIL".red()
-            },
-            link.url
-        );
+                    let status_str = match result.status.as_u16() {
+                        200..=299 => result.status.to_string().green(),
+                        300..=399 => result.status.to_string().yellow(),
+                        400..=499 => result.status.to_string().red(),
+                        _ => result.status.to_string().red().bold(),
+                    };
 
-        results.push(result);
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-
-    println!("\n{}", "Link check completed.".bold());
+                    // print progress
+                    println!(
+                        "[{}/{}] {} - {} - {}",
+                        current,
+                        total_links,
+                        status_str,
+                        if result.status.is_success() {
+                            "GOOD".green()
+                        } else {
+                            "FAIL".red()
+                        },
+                        link.url
+                    );
+                    result
+                }
+            }
+        })
+        .buffer_unordered(10)
+        .collect::<Vec<_>>()
+        .await;
 
     let successful = results.iter().filter(|r| r.status.is_success()).count();
     let redirects = results.iter().filter(|r| r.status.is_redirection()).count();
@@ -104,6 +106,7 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
         .filter(|r| r.status.is_client_error() || r.status.is_server_error())
         .count();
 
+    println!("\n{}", "Link check completed.".bold());
     println!("\n{}", "Summary:".bold());
     println!("{}: {}", "Successful".green(), successful);
     if redirects > 0 {
@@ -120,60 +123,37 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
     let mut retries = 3;
     let initial_url = link.url.clone();
 
-    while retries > 0 {
+    loop {
         match client.get(&link.url).send().await {
             Ok(response) => {
-                let status = response.status();
-                // Only return immediately on actual success (2xx).
-                // Let reqwest handle redirects; the status here should be the final one.
                 return CheckResult {
                     link: LinkInfo {
                         url: initial_url,
                         file_path: link.file_path,
                     },
-                    status,
-                    error_message: if status.is_success() {
+                    status: response.status(),
+                    error_message: if response.status().is_success() {
                         None
                     } else {
-                        Some(format!("HTTP {}", status))
+                        Some(format!("HTTP {}", response.status()))
                     },
                 };
             }
             Err(e) => {
-                if retries > 1 {
+                retries -= 1;
+                if retries == 0 {
                     return CheckResult {
                         link: LinkInfo {
                             url: initial_url,
                             file_path: link.file_path,
                         },
-                        // Use a status code that indicates a request failure rather than a server error
-                        status: StatusCode::INTERNAL_SERVER_ERROR, // Or perhaps another code?
-                        error_message: Some(format!("Request failed after retries: {}", e)),
+                        status: StatusCode::INTERNAL_SERVER_ERROR,
+                        error_message: Some(format!("Request failed: {}", e)),
                     };
                 }
-                println!(
-                    "\n{} {} ({} attempts left): {}",
-                    "Retrying".yellow(),
-                    link.url,
-                    retries - 1,
-                    e.to_string().red()
-                );
+                tokio::time::sleep(Duration::from_secs(1)).await;
             }
         }
-
-        retries -= 1;
-        if retries > 0 {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-        }
-    }
-
-    CheckResult {
-        link: LinkInfo {
-            url: initial_url,
-            file_path: link.file_path,
-        },
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        error_message: Some("Failed due to unexpected error or exhausted retries.".to_string()),
     }
 }
 
