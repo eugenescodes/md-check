@@ -31,9 +31,8 @@ runs:
       env:
         GITHUB_ACTIONS: "true"
       run: |
-        # Enable debug output and immediate output flushing
+        # Enable immediate output flushing with stdbuf
         set -x
-        
         if [[ "${{ inputs.skip_links }}" == "true" ]]; then
           stdbuf -o0 find . -name "${{ inputs.files }}" -type f -exec md-check --skip-links {} \;
         else

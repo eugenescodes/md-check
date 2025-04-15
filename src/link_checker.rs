@@ -58,16 +58,14 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
     let total_links = links.len();
 
     if is_github_actions {
-        println!("::group::Found Links");
+        println!("::notice::Found {} links to check", total_links);
         for link in &links {
             println!(
-                "::debug::Link found: {} in {}",
+                "::debug::Checking link: {} in {}",
                 link.url,
                 link.file_path.display()
             );
         }
-        println!("::endgroup::");
-        println!("::group::Link Check Progress");
     }
 
     println!("\n{} {} links to check", "Total:".bold(), total_links);
@@ -89,17 +87,14 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                 };
 
                 if is_github_actions {
+                    let status = if result.status.is_success() {
+                        "success"
+                    } else {
+                        "failure"
+                    };
                     println!(
-                        "::debug::[{}/{}] Status {} - {} - {}",
-                        current,
-                        total_links,
-                        result.status,
-                        if result.status.is_success() {
-                            "GOOD"
-                        } else {
-                            "FAIL"
-                        },
-                        link.url
+                        "::debug::Link {} status: {} ({})",
+                        link.url, result.status, status
                     );
                 } else {
                     println!(
