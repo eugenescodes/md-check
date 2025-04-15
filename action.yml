@@ -28,12 +28,14 @@ runs:
 
     - name: Check Markdown files
       shell: bash
+      env:
+        GITHUB_ACTIONS: "true"
       run: |
-        # Enable debug output
+        # Enable debug output and immediate output flushing
         set -x
         
         if [[ "${{ inputs.skip_links }}" == "true" ]]; then
-          find . -name "${{ inputs.files }}" -type f -exec md-check --skip-links {} \;
+          stdbuf -o0 find . -name "${{ inputs.files }}" -type f -exec md-check --skip-links {} \;
         else
-          find . -name "${{ inputs.files }}" -type f -exec md-check {} \;
+          stdbuf -o0 find . -name "${{ inputs.files }}" -type f -exec md-check {} \;
         fi

@@ -43,6 +43,8 @@ pub fn extract_links(content: &str, file_path: &Path) -> Vec<LinkInfo> {
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
+    let is_github_actions = std::env::var("GITHUB_ACTIONS").is_ok();
+
     let client = Client::builder()
         .redirect(Policy::limited(10))
         .timeout(Duration::from_secs(30))
@@ -54,31 +56,52 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
         .unwrap_or_default();
 
     let total_links = links.len();
-    println!("\n{} {} links to check", "Total:".bold(), total_links);
 
-    // Add counter for progress
-    let _counter = std::sync::atomic::AtomicUsize::new(0);
+    if is_github_actions {
+        println!("::group::Found Links");
+        for link in &links {
+            println!(
+                "::debug::Link found: {} in {}",
+                link.url,
+                link.file_path.display()
+            );
+        }
+        println!("::endgroup::");
+        println!("::group::Link Check Progress");
+    }
+
+    println!("\n{} {} links to check", "Total:".bold(), total_links);
 
     COUNTER.store(0, Ordering::SeqCst);
 
     let results = stream::iter(links)
         .map(|link| {
-            {
-                let client = client.clone();
-                async move {
-                    // println!("Checking link: {}", link.url.cyan());
+            let client = client.clone();
+            async move {
+                let result = check_single_link(&client, link.clone()).await;
+                let current = COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
 
-                    let result = check_single_link(&client, link.clone()).await;
-                    let current = COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
+                let status_str = match result.status.as_u16() {
+                    200..=299 => result.status.to_string().green(),
+                    300..=399 => result.status.to_string().yellow(),
+                    400..=499 => result.status.to_string().red(),
+                    _ => result.status.to_string().red().bold(),
+                };
 
-                    let status_str = match result.status.as_u16() {
-                        200..=299 => result.status.to_string().green(),
-                        300..=399 => result.status.to_string().yellow(),
-                        400..=499 => result.status.to_string().red(),
-                        _ => result.status.to_string().red().bold(),
-                    };
-
-                    // print progress
+                if is_github_actions {
+                    println!(
+                        "::debug::[{}/{}] Status {} - {} - {}",
+                        current,
+                        total_links,
+                        result.status,
+                        if result.status.is_success() {
+                            "GOOD"
+                        } else {
+                            "FAIL"
+                        },
+                        link.url
+                    );
+                } else {
                     println!(
                         "[{}/{}] {} - {} - {}",
                         current,
@@ -91,20 +114,29 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                         },
                         link.url
                     );
-                    result
                 }
+                result
             }
         })
         .buffer_unordered(10)
         .collect::<Vec<_>>()
         .await;
 
+    if is_github_actions {
+        println!("::endgroup::");
+    }
+
+    // Print summary
     let successful = results.iter().filter(|r| r.status.is_success()).count();
     let redirects = results.iter().filter(|r| r.status.is_redirection()).count();
     let failed = results
         .iter()
         .filter(|r| r.status.is_client_error() || r.status.is_server_error())
         .count();
+
+    if is_github_actions {
+        println!("::group::Summary");
+    }
 
     println!("\n{}", "Link check completed.".bold());
     println!("\n{}", "Summary:".bold());
@@ -114,6 +146,10 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
     }
     if failed > 0 {
         println!("{}: {}", "Failed".red(), failed);
+    }
+
+    if is_github_actions {
+        println!("::endgroup::");
     }
 
     results
