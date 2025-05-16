@@ -87,15 +87,20 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                 };
 
                 if is_github_actions {
-                    let status = if result.status.is_success() {
-                        "success"
+                    if result.status.is_success() {
+                        println!(
+                            "::debug::Link {} status: {} (success)",
+                            link.url, result.status
+                        );
                     } else {
-                        "failure"
-                    };
-                    println!(
-                        "::debug::Link {} status: {} ({})",
-                        link.url, result.status, status
-                    );
+                        println!(
+                            "::error file={}::Link {} failed with status {}{}",
+                            link.file_path.display(),
+                            link.url,
+                            result.status,
+                            result.error_message.as_ref().map(|m| format!(" - {}", m)).unwrap_or_default()
+                        );
+                    }
                 } else {
                     println!(
                         "[{}/{}] {} - {} - {}",
