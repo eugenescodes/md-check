@@ -7,7 +7,7 @@ edition = "2024"
 clap = { version = "4.5.44", features = ["derive"] }
 pulldown-cmark = "0.13.0"
 regex = "1.11.1"
-reqwest = { version = "0.12.22", features = ["blocking"] }
+reqwest = { version = "0.12.23", features = ["blocking"] }
 tokio = { version = "1.47.1", features = ["full"] }
 url = "2.5.4"
 walkdir = "2.5.0"
@@ -18,7 +18,7 @@ colored = "3.0.0"
 
 [dev-dependencies]
 tokio = { version = "1.47.1", features = ["full"] }
-reqwest = { version = "0.12.22", features = ["json"] }
+reqwest = { version = "0.12.23", features = ["json"] }
 assert_cmd = "2.0.17"
 predicates = "3.1.3"
 tempfile = "3.20.0"
