@@ -24,6 +24,12 @@ jobs:
           toolchain: stable
           profile: minimal
 
+      - name: Check code formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run clippy (Rust linter)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
       - name: Install md-check
         run: |
           # cargo install --git https://github.com/eugenescodes/md-check

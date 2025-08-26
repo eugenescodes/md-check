@@ -10,6 +10,7 @@ A command-line tool that validates markdown files by checking for broken links a
 - Shows real-time progress with colored output
 - Provides a summary of link check results
 - Basic markdown linting capabilities and capability add new rules
+- Lint errors include precise line numbers and are deduplicated for clarity
 - Supports multiple files and directories
 - Supports GitHub action and pre-commit
 
@@ -66,7 +67,7 @@ The tool provides colored output showing:
 - Real-time progress of link checking
 - HTTP status codes for each link
 - Summary of successful, redirected, and failed links
-- Linting errors if found
+- Linting errors if found, with line numbers and no duplicate reports for the same issue
 
 Example output:
 
@@ -131,6 +132,12 @@ jobs:
 ```
 
 ## Development
+
+### Code Quality
+
+- Code formatting is enforced with `cargo fmt`.
+- Linting is enforced with `cargo clippy`.
+- Both checks run automatically in CI via GitHub Actions.
 
 Project Structure
 

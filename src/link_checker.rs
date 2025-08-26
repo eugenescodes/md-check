@@ -98,7 +98,11 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                             link.file_path.display(),
                             link.url,
                             result.status,
-                            result.error_message.as_ref().map(|m| format!(" - {}", m)).unwrap_or_default()
+                            result
+                                .error_message
+                                .as_ref()
+                                .map(|m| format!(" - {}", m))
+                                .unwrap_or_default()
                         );
                     }
                 } else {
@@ -221,7 +225,7 @@ pub fn format_check_results(results: &[CheckResult]) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mockito;
+    
 
     #[tokio::test]
     async fn test_redirect_handling() {
