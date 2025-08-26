@@ -222,11 +222,10 @@ pub fn format_check_results(results: &[CheckResult]) -> Vec<String> {
         .collect()
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[tokio::test]
     async fn test_redirect_handling() {
         let mut server = mockito::Server::new_async().await;
