@@ -3,6 +3,12 @@ use pulldown_cmark::Event;
 
 pub struct NoHtmlRule;
 
+impl Default for NoHtmlRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NoHtmlRule {
     pub fn new() -> Self {
         Self

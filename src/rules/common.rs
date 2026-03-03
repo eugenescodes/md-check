@@ -14,6 +14,7 @@ pub struct LintContext {
     pub current_line_number: usize,
     pub current_line_is_blank: bool,
     pub previous_line_was_blank: bool,
+    pub line_text: String,
 }
 
 pub trait Rule {

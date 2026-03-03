@@ -3,6 +3,12 @@ use pulldown_cmark::{Event, Tag};
 
 pub struct NoEmptyLinksRule;
 
+impl Default for NoEmptyLinksRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NoEmptyLinksRule {
     pub fn new() -> Self {
         Self
@@ -23,15 +29,15 @@ impl Rule for NoEmptyLinksRule {
     }
 
     fn check(&self, event: &Event<'_>, context: &LintContext) -> Option<LintError> {
-        if let Event::Start(Tag::Link { dest_url, .. }) = event {
-            if dest_url.is_empty() {
-                return Some(LintError {
-                    file_path: context.file_path.to_path_buf(),
-                    line: 0,
-                    message: "Empty link URL found".to_string(),
-                    rule_id: self.id().to_string(),
-                });
-            }
+        if let Event::Start(Tag::Link { dest_url, .. }) = event
+            && dest_url.is_empty()
+        {
+            return Some(LintError {
+                file_path: context.file_path.to_path_buf(),
+                line: 0,
+                message: "Empty link URL found".to_string(),
+                rule_id: self.id().to_string(),
+            });
         }
         None
     }

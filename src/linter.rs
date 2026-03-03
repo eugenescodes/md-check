@@ -1,35 +1,9 @@
 use pulldown_cmark::{Event, Parser, Tag};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-#[derive(Debug)]
-pub struct LintError {
-    pub file_path: PathBuf,
-    pub line: usize,
-    pub message: String,
-    pub rule_id: String,
-}
-
-pub trait Rule {
-    fn check(&self, event: &Event<'_>, file_path: &Path) -> Option<LintError>;
-}
-
-struct NoEmptyLinksRule;
-
-impl Rule for NoEmptyLinksRule {
-    fn check(&self, event: &Event<'_>, file_path: &Path) -> Option<LintError> {
-        if let Event::Start(Tag::Link { dest_url, .. }) = event
-            && dest_url.is_empty()
-        {
-            return Some(LintError {
-                file_path: file_path.to_path_buf(),
-                line: 0,
-                message: "Empty link URL found".to_string(),
-                rule_id: "NO_EMPTY_LINKS".to_string(),
-            });
-        }
-        None
-    }
-}
+// setup module system rules
+use crate::rules::common::{LintContext, LintError};
+use crate::rules::get_rules;
 
 /// Lints the provided Markdown content against defined rules.
 ///
@@ -53,14 +27,46 @@ impl Rule for NoEmptyLinksRule {
 pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
     let parser = Parser::new(content);
     let mut errors = Vec::new();
-    let rules: Vec<Box<dyn Rule>> = vec![Box::new(NoEmptyLinksRule)];
+    let rules = get_rules();
 
-    // Split content into lines for line number tracking
     let lines: Vec<&str> = content.lines().collect();
+
+    // ==========================================
+    // 1: check lines (MD012)
+    // ==========================================
+    let mut previous_line_was_blank = false;
+    for (idx, line) in lines.iter().enumerate() {
+        let current_line_number = idx + 1;
+        let current_line_is_blank = line.trim().is_empty();
+
+        let context = LintContext {
+            file_path: file_path.to_path_buf(),
+            current_line_number,
+            current_line_is_blank,
+            previous_line_was_blank,
+            line_text: line.to_string(),
+        };
+
+        let dummy_event = Event::Text("".into());
+
+        for rule in &rules {
+            let rule_id = rule.id();
+            // run only rules that check lines (MD012)
+            if (rule_id == "MD012" || rule_id == "LINE_TOO_LONG")
+                && let Some(error) = rule.check(&dummy_event, &context)
+            {
+                errors.push(error);
+            }
+        }
+        previous_line_was_blank = current_line_is_blank;
+    }
+
+    // ==========================================
+    // 2: check AST (NO_EMPTY_LINKS etc.)
+    // ==========================================
     let mut current_line = 1;
 
     for event in parser {
-        // Try to match event text to a line for better line number reporting
         let mut event_line = 1;
         if let Event::Start(Tag::Link { dest_url, .. }) = &event {
             for (idx, line) in lines.iter().enumerate() {
@@ -73,16 +79,30 @@ pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
             event_line = current_line;
         }
 
+        let context = LintContext {
+            file_path: file_path.to_path_buf(),
+            current_line_number: event_line,
+            current_line_is_blank: false,
+            previous_line_was_blank: false,
+            line_text: String::new(),
+        };
+
         for rule in &rules {
-            if let Some(mut error) = rule.check(&event, file_path) {
+            let rule_id = rule.id();
+            // run only AST rules
+            if rule_id != "MD012"
+                && rule_id != "LINE_TOO_LONG"
+                && let Some(mut error) = rule.check(&event, &context)
+            {
                 error.line = event_line;
                 errors.push(error);
             }
         }
+
         current_line += 1;
     }
 
-    // Deduplicate errors by (file_path, line, rule_id, message)
+    // deduplicate and sort errors by line number
     use std::collections::HashSet;
     let mut seen = HashSet::new();
     errors.retain(|e| {
@@ -95,5 +115,6 @@ pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
         seen.insert(key)
     });
 
+    errors.sort_by_key(|e| e.line);
     errors
 }
