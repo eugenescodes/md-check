@@ -102,5 +102,5 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Verify container startup and dependency compatibility
-        run: docker run --rm md-check:ci-test .
-        # run: docker run --rm -v ${{ github.workspace }}:/workspace md-check:ci-test /workspace
+        # run: docker run --rm md-check:ci-test .
+        run: docker run --rm -v ${{ github.workspace }}:/workspace md-check:ci-test /workspace
