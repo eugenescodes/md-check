@@ -22,13 +22,13 @@ impl Rule for NoConsecutiveEmptyLinesRule {
         // Check if the current line is blank AND the previous line was also blank
         if context.current_line_is_blank && context.previous_line_was_blank {
             Some(LintError {
+                file_path: context.file_path.clone(), // add file_path
                 line: context.current_line_number,
-                column: 0, // Column is not specific for this rule
                 message: "Multiple consecutive blank lines found (MD012)".to_string(),
                 rule_id: self.id().to_string(),
             })
         } else {
-        None
+            None
         }
     }
 }
