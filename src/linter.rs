@@ -31,6 +31,25 @@ impl Rule for NoEmptyLinksRule {
     }
 }
 
+/// Lints the provided Markdown content against defined rules.
+///
+/// Currently, it checks for empty links (e.g., `[]()`).
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+/// use md_check::linter::lint;
+///
+/// let content = "This text contains an [empty link]().";
+/// let file_path = Path::new("test.md");
+///
+/// let errors = lint(content, file_path);
+///
+/// assert_eq!(errors.len(), 1);
+/// assert_eq!(errors[0].rule_id, "NO_EMPTY_LINKS");
+/// assert_eq!(errors[0].message, "Empty link URL found");
+/// ```
 pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
     let parser = Parser::new(content);
     let mut errors = Vec::new();

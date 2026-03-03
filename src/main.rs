@@ -4,8 +4,8 @@ use colored::*;
 use std::fs;
 use std::path::PathBuf;
 
-mod link_checker;
-mod linter;
+use md_check::link_checker;
+use md_check::linter;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

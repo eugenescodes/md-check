@@ -20,6 +20,23 @@ pub struct CheckResult {
     pub error_message: Option<String>,
 }
 
+/// Extracts all valid HTTP and HTTPS links from the given Markdown content.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::Path;
+/// use md_check::link_checker::extract_links;
+///
+/// let content = "Check out [Rust](https://www.rust-lang.org) and [GitHub](https://github.com).";
+/// let file_path = Path::new("example.md");
+///
+/// let links = extract_links(content, file_path);
+///
+/// assert_eq!(links.len(), 2);
+/// assert_eq!(links[0].url, "https://www.rust-lang.org");
+/// assert_eq!(links[1].url, "https://github.com");
+/// ```
 pub fn extract_links(content: &str, file_path: &Path) -> Vec<LinkInfo> {
     let parser = Parser::new(content);
     let mut links = Vec::new();
@@ -42,6 +59,32 @@ pub fn extract_links(content: &str, file_path: &Path) -> Vec<LinkInfo> {
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
+/// Asynchronously checks a list of extracted links by making HTTP requests.
+///
+/// This function uses a concurrent stream to verify the status of each URL.
+///
+/// # Examples
+///
+/// ```no_run
+/// # #[tokio::main]
+/// # async fn main() {
+/// use std::path::PathBuf;
+/// use md_check::link_checker::{check_links, LinkInfo};
+///
+/// let links = vec![
+///     LinkInfo {
+///         url: "[https://www.rust-lang.org](https://www.rust-lang.org)".to_string(),
+///         file_path: PathBuf::from("test.md"),
+///     }
+/// ];
+///
+/// // This will perform actual network requests
+/// let results = check_links(links).await;
+///
+/// assert_eq!(results.len(), 1);
+/// assert!(results[0].status.is_success());
+/// # }
+/// ```
 pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
     let is_github_actions = std::env::var("GITHUB_ACTIONS").is_ok();
 
@@ -197,6 +240,34 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
     }
 }
 
+/// Formats the results of link checks into human-readable error messages.
+///
+/// It filters out successful requests and returns formatted strings for
+/// broken links, client errors, or missing protocols.
+///
+/// # Examples
+///
+/// ```
+/// use std::path::PathBuf;
+/// use reqwest::StatusCode;
+/// use md_check::link_checker::{format_check_results, CheckResult, LinkInfo};
+///
+/// let results = vec![
+///     CheckResult {
+///         link: LinkInfo {
+///             url: "https://invalid.domain.xyz".to_string(),
+///             file_path: PathBuf::from("doc.md"),
+///         },
+///         status: StatusCode::NOT_FOUND,
+///         error_message: Some("Not Found".to_string()),
+///     }
+/// ];
+///
+/// let formatted = format_check_results(&results);
+///
+/// assert_eq!(formatted.len(), 1);
+/// assert!(formatted[0].contains("https://invalid.domain.xyz"));
+/// ```
 pub fn format_check_results(results: &[CheckResult]) -> Vec<String> {
     results
         .iter()
