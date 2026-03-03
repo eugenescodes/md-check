@@ -103,4 +103,4 @@ jobs:
 
       - name: Verify container startup and dependency compatibility
         # run: docker run --rm md-check:ci-test .
-        run: docker run --rm -v ${{ github.workspace }}:/workspace md-check:ci-test /workspace
+        run: docker run --rm -v ${{ github.workspace }}:/workspace/test-md-files/ md-check:ci-test /workspace/test-md-files/
