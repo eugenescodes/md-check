@@ -64,9 +64,7 @@ pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
     // ==========================================
     // 2: check AST (NO_EMPTY_LINKS etc.)
     // ==========================================
-    let mut current_line = 1;
-
-    for event in parser {
+    for (line_num, event) in (1..).zip(parser) {
         let mut event_line = 1;
         if let Event::Start(Tag::Link { dest_url, .. }) = &event {
             for (idx, line) in lines.iter().enumerate() {
@@ -76,7 +74,7 @@ pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
                 }
             }
         } else {
-            event_line = current_line;
+            event_line = line_num;
         }
 
         let context = LintContext {
@@ -98,8 +96,6 @@ pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
                 errors.push(error);
             }
         }
-
-        current_line += 1;
     }
 
     // deduplicate and sort errors by line number
