@@ -13,6 +13,8 @@ A command-line tool that validates markdown files by checking for broken links a
 - Lint errors include precise line numbers and are deduplicated for clarity
 - Supports multiple files and directories
 - Supports GitHub action and pre-commit
+- CI-friendly: exits with a non-zero code when broken links or style errors are found
+- TLS via rustls (no OpenSSL dependency)
 
 ## Installation
 

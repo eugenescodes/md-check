@@ -3,12 +3,6 @@ FROM rust:1.93-slim AS builder
 
 WORKDIR /build
 
-# Install compilation dependencies
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    && rm -rf /var/lib/apt/lists/*
-
 # Copy Cargo files
 COPY Cargo.toml Cargo.lock ./
 
@@ -30,12 +24,10 @@ FROM debian:stable-slim
 
 WORKDIR /app
 
-# Install only necessary runtime dependencies
+# TLS is handled by rustls (no OpenSSL needed), but root certificates are
+# loaded from the system store via rustls-native-certs
 RUN apt-get update && apt-get install -y \
     ca-certificates \
-    libssl3 \
-    curl \
-    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy compiled binary

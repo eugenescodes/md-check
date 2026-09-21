@@ -1,116 +1,112 @@
 use pulldown_cmark::{Event, Parser, Tag};
 use std::path::Path;
+use url::Url;
 
-// setup module system rules
-use crate::rules::common::{LintContext, LintError};
-use crate::rules::get_rules;
+use crate::link_checker::LinkInfo;
+use crate::rules::common::LintError;
+use crate::rules::{get_event_rules, get_line_rules};
 
-/// Lints the provided Markdown content against defined rules.
+/// Result of analyzing one Markdown file: lint errors plus links to check.
+#[derive(Debug, Default)]
+pub struct Analysis {
+    pub lint_errors: Vec<LintError>,
+    pub links: Vec<LinkInfo>,
+}
+
+/// Byte offset of the start of every line; line `k` (1-based) starts at
+/// `starts[k - 1]`.
+fn line_starts(content: &str) -> Vec<usize> {
+    let mut starts = vec![0];
+    for (offset, byte) in content.bytes().enumerate() {
+        if byte == b'\n' {
+            starts.push(offset + 1);
+        }
+    }
+    starts
+}
+
+/// 1-based line number containing the given byte offset.
+fn line_number(starts: &[usize], offset: usize) -> usize {
+    starts.partition_point(|&start| start <= offset)
+}
+
+/// Analyzes Markdown content in a single parsing pass.
 ///
-/// Currently, it checks for empty links (e.g., `[]()`).
+/// Runs the line-based rules (MD012, LINE_TOO_LONG), the AST-based rules
+/// (NO_EMPTY_LINKS, NO_HTML) and collects all http(s) links for checking.
+/// Event line numbers are derived from the parser's byte offsets, so they are
+/// exact even when several events occur on the same line.
 ///
 /// # Examples
 ///
 /// ```
 /// use std::path::Path;
-/// use md_check::linter::lint;
+/// use md_check::linter::analyze;
 ///
 /// let content = "This text contains an [empty link]().";
 /// let file_path = Path::new("test.md");
 ///
-/// let errors = lint(content, file_path);
+/// let analysis = analyze(content, file_path);
 ///
-/// assert_eq!(errors.len(), 1);
-/// assert_eq!(errors[0].rule_id, "NO_EMPTY_LINKS");
-/// assert_eq!(errors[0].message, "Empty link URL found");
+/// assert_eq!(analysis.lint_errors.len(), 1);
+/// assert_eq!(analysis.lint_errors[0].rule_id, "NO_EMPTY_LINKS");
+/// assert_eq!(analysis.lint_errors[0].message, "Empty link URL found");
+/// assert_eq!(analysis.lint_errors[0].line, 1);
 /// ```
-pub fn lint(content: &str, file_path: &Path) -> Vec<LintError> {
-    let parser = Parser::new(content);
-    let mut errors = Vec::new();
-    let rules = get_rules();
+pub fn analyze(content: &str, file_path: &Path) -> Analysis {
+    let starts = line_starts(content);
+    let mut analysis = Analysis::default();
 
-    let lines: Vec<&str> = content.lines().collect();
+    let line_rules = get_line_rules();
+    let event_rules = get_event_rules();
 
-    // ==========================================
-    // 1: check lines (MD012)
-    // ==========================================
+    // 1: line-based rules (MD012, LINE_TOO_LONG)
     let mut previous_line_was_blank = false;
-    for (idx, line) in lines.iter().enumerate() {
-        let current_line_number = idx + 1;
-        let current_line_is_blank = line.trim().is_empty();
+    for (idx, line) in content.lines().enumerate() {
+        let line_number = idx + 1;
 
-        let context = LintContext {
-            file_path: file_path.to_path_buf(),
-            current_line_number,
-            current_line_is_blank,
-            previous_line_was_blank,
-            line_text: line.to_string(),
-        };
-
-        let dummy_event = Event::Text("".into());
-
-        for rule in &rules {
-            let rule_id = rule.id();
-            // run only rules that check lines (MD012)
-            if (rule_id == "MD012" || rule_id == "LINE_TOO_LONG")
-                && let Some(error) = rule.check(&dummy_event, &context)
+        for rule in &line_rules {
+            if let Some(error) =
+                rule.check_line(file_path, line, line_number, previous_line_was_blank)
             {
-                errors.push(error);
+                analysis.lint_errors.push(error);
             }
         }
-        previous_line_was_blank = current_line_is_blank;
+
+        previous_line_was_blank = line.trim().is_empty();
     }
 
-    // ==========================================
-    // 2: check AST (NO_EMPTY_LINKS etc.)
-    // ==========================================
-    for (line_num, event) in (1..).zip(parser) {
-        let mut event_line = 1;
+    // 2: AST rules and link extraction in a single pass
+    for (event, range) in Parser::new(content).into_offset_iter() {
+        let line = line_number(&starts, range.start);
+
         if let Event::Start(Tag::Link { dest_url, .. }) = &event {
-            for (idx, line) in lines.iter().enumerate() {
-                if line.contains(dest_url.as_ref()) {
-                    event_line = idx + 1;
-                    break;
-                }
+            let url_str = dest_url.to_string();
+            if (url_str.starts_with("http://") || url_str.starts_with("https://"))
+                && Url::parse(&url_str).is_ok()
+            {
+                analysis.links.push(LinkInfo {
+                    url: url_str,
+                    file_path: file_path.to_path_buf(),
+                });
             }
-        } else {
-            event_line = line_num;
         }
 
-        let context = LintContext {
-            file_path: file_path.to_path_buf(),
-            current_line_number: event_line,
-            current_line_is_blank: false,
-            previous_line_was_blank: false,
-            line_text: String::new(),
-        };
-
-        for rule in &rules {
-            let rule_id = rule.id();
-            // run only AST rules
-            if rule_id != "MD012"
-                && rule_id != "LINE_TOO_LONG"
-                && let Some(mut error) = rule.check(&event, &context)
-            {
-                error.line = event_line;
-                errors.push(error);
+        for rule in &event_rules {
+            if let Some(error) = rule.check_event(file_path, &event, line) {
+                analysis.lint_errors.push(error);
             }
         }
     }
 
-    // deduplicate and sort errors by line number
-    use std::collections::HashSet;
-    let mut seen = HashSet::new();
-    errors.retain(|e| {
-        let key = (
-            e.file_path.clone(),
-            e.line,
-            e.rule_id.clone(),
-            e.message.clone(),
-        );
-        seen.insert(key)
-    });
+    // Deduplicate identical errors (same line, rule and message) and sort by line
+    analysis
+        .lint_errors
+        .sort_by(|a, b| (a.line, &a.rule_id, &a.message).cmp(&(b.line, &b.rule_id, &b.message)));
+    // Use owned keys so no borrowed fields escape the deduplication closure.
+    analysis
+        .lint_errors
+        .dedup_by_key(|error| (error.line, error.rule_id.clone(), error.message.clone()));
 
-    errors.sort_by_key(|e| e.line);
-    errors
+    analysis
 }

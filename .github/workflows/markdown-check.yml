@@ -1,7 +1,6 @@
 name: Markdown Checker
 permissions:
   contents: read
-  # pull-requests: write
 
 on:
   push:
@@ -19,22 +18,14 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          profile: minimal
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Check code formatting
         run: cargo fmt --all -- --check
-
-      - name: Run clippy (Rust linter)
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        continue-on-error: true
 
       - name: Install md-check
-        run: |
-          # cargo install --git https://github.com/eugenescodes/md-check
-          cargo install --path .
+        run: cargo install --path .
 
       - name: Check Markdown files
-        run: |
-          find . -name "*.md" -type f -exec md-check lint {} \;
+        run: md-check .

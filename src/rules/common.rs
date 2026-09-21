@@ -1,5 +1,5 @@
 use pulldown_cmark::Event;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug)]
 pub struct LintError {
@@ -9,17 +9,31 @@ pub struct LintError {
     pub rule_id: String,
 }
 
-pub struct LintContext {
-    pub file_path: PathBuf,
-    pub current_line_number: usize,
-    pub current_line_is_blank: bool,
-    pub previous_line_was_blank: bool,
-    pub line_text: String,
+/// A rule that inspects the file line by line (blank lines, line length, ...).
+pub trait LineRule {
+    fn id(&self) -> &'static str;
+
+    /// Checks a single line. `previous_line_was_blank` lets stateful rules
+    /// (e.g. MD012) work without keeping internal state.
+    fn check_line(
+        &self,
+        file_path: &Path,
+        line: &str,
+        line_number: usize,
+        previous_line_was_blank: bool,
+    ) -> Option<LintError>;
 }
 
-pub trait Rule {
+/// A rule that inspects AST events produced by pulldown-cmark.
+pub trait EventRule {
     fn id(&self) -> &'static str;
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
-    fn check(&self, event: &Event<'_>, context: &LintContext) -> Option<LintError>;
+
+    /// `line_number` is the exact 1-based line of the event, derived from the
+    /// parser's byte offsets.
+    fn check_event(
+        &self,
+        file_path: &Path,
+        event: &Event<'_>,
+        line_number: usize,
+    ) -> Option<LintError>;
 }

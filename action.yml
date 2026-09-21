@@ -16,10 +16,7 @@ runs:
   using: 'composite'
   steps:
     - name: Install Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        toolchain: stable
-        profile: minimal
+      uses: dtolnay/rust-toolchain@stable
 
     - name: Install md-check
       shell: bash

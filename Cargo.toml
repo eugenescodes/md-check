@@ -6,19 +6,15 @@ edition = "2024"
 [dependencies]
 clap = { version = "4.6.1", features = ["derive"] }
 pulldown-cmark = "0.13.4"
-regex = "1.12.4"
-reqwest = { version = "0.13.4", features = ["blocking"] }
-tokio = { version = "1.52.3", features = ["full"] }
+reqwest = { version = "0.13.4", default-features = false, features = ["rustls"] }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "time"] }
 url = "2.5.8"
 walkdir = "2.5.0"
 futures = "0.3.32"
-thiserror = "2.0.18"
 anyhow = "1.0.102"
 colored = "3.1.1"
 
 [dev-dependencies]
-tokio = { version = "1.52.3", features = ["full"] }
-reqwest = { version = "0.13.4", features = ["json"] }
 assert_cmd = "2.2.2"
 predicates = "3.1.4"
 tempfile = "3.27.0"

@@ -1,11 +1,10 @@
 use colored::*;
 use futures::stream::{self, StreamExt};
-use pulldown_cmark::{Event, Parser, Tag};
 use reqwest::{Client, StatusCode, redirect::Policy};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-use url::Url;
 
 #[derive(Debug, Clone)]
 pub struct LinkInfo {
@@ -16,48 +15,14 @@ pub struct LinkInfo {
 #[derive(Debug)]
 pub struct CheckResult {
     pub link: LinkInfo,
-    pub status: StatusCode,
+    /// Final HTTP status code. `None` means the request itself failed
+    /// (DNS, connection or timeout error) and no HTTP status was received.
+    pub status: Option<StatusCode>,
     pub error_message: Option<String>,
 }
 
-/// Extracts all valid HTTP and HTTPS links from the given Markdown content.
-///
-/// # Examples
-///
-/// ```
-/// use std::path::Path;
-/// use md_check::link_checker::extract_links;
-///
-/// let content = "Check out [Rust](https://www.rust-lang.org) and [GitHub](https://github.com).";
-/// let file_path = Path::new("example.md");
-///
-/// let links = extract_links(content, file_path);
-///
-/// assert_eq!(links.len(), 2);
-/// assert_eq!(links[0].url, "https://www.rust-lang.org");
-/// assert_eq!(links[1].url, "https://github.com");
-/// ```
-pub fn extract_links(content: &str, file_path: &Path) -> Vec<LinkInfo> {
-    let parser = Parser::new(content);
-    let mut links = Vec::new();
-
-    for event in parser {
-        if let Event::Start(Tag::Link { dest_url, .. }) = event {
-            let url_str = dest_url.to_string();
-            if (url_str.starts_with("http://") || url_str.starts_with("https://"))
-                && Url::parse(&url_str).is_ok()
-            {
-                links.push(LinkInfo {
-                    url: url_str,
-                    file_path: file_path.to_path_buf(),
-                });
-            }
-        }
-    }
-    links
-}
-
-static COUNTER: AtomicUsize = AtomicUsize::new(0);
+const MAX_RETRIES: u32 = 3;
+const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 
 /// Asynchronously checks a list of extracted links by making HTTP requests.
 ///
@@ -71,22 +36,20 @@ static COUNTER: AtomicUsize = AtomicUsize::new(0);
 /// use std::path::PathBuf;
 /// use md_check::link_checker::{check_links, LinkInfo};
 ///
-/// let links = vec![
-///     LinkInfo {
-///         url: "[https://www.rust-lang.org](https://www.rust-lang.org)".to_string(),
-///         file_path: PathBuf::from("test.md"),
-///     }
-/// ];
+/// let links = vec![LinkInfo {
+///     url: "https://www.rust-lang.org".to_string(),
+///     file_path: PathBuf::from("test.md"),
+/// }];
 ///
 /// // This will perform actual network requests
 /// let results = check_links(links).await;
 ///
 /// assert_eq!(results.len(), 1);
-/// assert!(results[0].status.is_success());
+/// assert!(results[0].status.is_some());
 /// # }
 /// ```
 pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
-    let is_github_actions = std::env::var("GITHUB_ACTIONS").is_ok();
+    let is_github_actions = std::env::var("GITHUB_ACTIONS").is_ok_and(|value| value == "true");
 
     let client = Client::builder()
         .redirect(Policy::limited(10))
@@ -113,38 +76,50 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
 
     println!("\n{} {} links to check", "Total:".bold(), total_links);
 
-    COUNTER.store(0, Ordering::SeqCst);
+    if is_github_actions {
+        println!("::group::Checking links");
+    }
+
+    let counter = Arc::new(AtomicUsize::new(0));
 
     let results = stream::iter(links)
         .map(|link| {
             let client = client.clone();
+            let counter = Arc::clone(&counter);
             async move {
                 let result = check_single_link(&client, link.clone()).await;
-                let current = COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
+                let current = counter.fetch_add(1, Ordering::Relaxed) + 1;
 
-                let status_str = match result.status.as_u16() {
-                    200..=299 => result.status.to_string().green(),
-                    300..=399 => result.status.to_string().yellow(),
-                    400..=499 => result.status.to_string().red(),
-                    _ => result.status.to_string().red().bold(),
+                let status_str = match result.status {
+                    Some(code) => match code.as_u16() {
+                        200..=299 => code.to_string().green(),
+                        300..=399 => code.to_string().yellow(),
+                        _ => code.to_string().red(),
+                    },
+                    None => "network error".to_string().red().bold(),
                 };
 
                 if is_github_actions {
-                    if result.status.is_success() {
+                    let status_text = result
+                        .status
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "network error".to_string());
+
+                    if result.status.as_ref().is_some_and(|code| code.is_success()) {
                         println!(
                             "::debug::Link {} status: {} (success)",
-                            link.url, result.status
+                            link.url, status_text
                         );
                     } else {
                         println!(
-                            "::error file={}::Link {} failed with status {}{}",
+                            "::error file={}::Link {} failed: {}{}",
                             link.file_path.display(),
                             link.url,
-                            result.status,
+                            status_text,
                             result
                                 .error_message
                                 .as_ref()
-                                .map(|m| format!(" - {}", m))
+                                .map(|m| format!(" - {m}"))
                                 .unwrap_or_default()
                         );
                     }
@@ -154,7 +129,7 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                         current,
                         total_links,
                         status_str,
-                        if result.status.is_success() {
+                        if result.status.as_ref().is_some_and(|code| code.is_success()) {
                             "GOOD".green()
                         } else {
                             "FAIL".red()
@@ -174,11 +149,20 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
     }
 
     // Print summary
-    let successful = results.iter().filter(|r| r.status.is_success()).count();
-    let redirects = results.iter().filter(|r| r.status.is_redirection()).count();
+    let successful = results
+        .iter()
+        .filter(|r| r.status.as_ref().is_some_and(|s| s.is_success()))
+        .count();
+    let redirects = results
+        .iter()
+        .filter(|r| r.status.as_ref().is_some_and(|s| s.is_redirection()))
+        .count();
     let failed = results
         .iter()
-        .filter(|r| r.status.is_client_error() || r.status.is_server_error())
+        .filter(|r| match r.status {
+            Some(s) => s.is_client_error() || s.is_server_error(),
+            None => true, // network errors count as failures
+        })
         .count();
 
     if is_github_actions {
@@ -203,22 +187,24 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
 }
 
 async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
-    let mut retries = 3;
     let initial_url = link.url.clone();
+    let mut backoff = INITIAL_BACKOFF;
+    let mut retries = MAX_RETRIES;
 
     loop {
         match client.get(&link.url).send().await {
             Ok(response) => {
+                let status = response.status();
                 return CheckResult {
                     link: LinkInfo {
                         url: initial_url,
                         file_path: link.file_path,
                     },
-                    status: response.status(),
-                    error_message: if response.status().is_success() {
+                    status: Some(status),
+                    error_message: if status.is_success() {
                         None
                     } else {
-                        Some(format!("HTTP {}", response.status()))
+                        Some(format!("HTTP {status}"))
                     },
                 };
             }
@@ -230,11 +216,13 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
                             url: initial_url,
                             file_path: link.file_path,
                         },
-                        status: StatusCode::INTERNAL_SERVER_ERROR,
-                        error_message: Some(format!("Request failed: {}", e)),
+                        status: None,
+                        error_message: Some(format!("Request failed: {e}")),
                     };
                 }
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                // Exponential backoff: 500ms, 1s, 2s, ...
+                tokio::time::sleep(backoff).await;
+                backoff = backoff.mul_f32(2.0);
             }
         }
     }
@@ -243,7 +231,7 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
 /// Formats the results of link checks into human-readable error messages.
 ///
 /// It filters out successful requests and returns formatted strings for
-/// broken links, client errors, or missing protocols.
+/// broken links, client errors, or network failures.
 ///
 /// # Examples
 ///
@@ -258,7 +246,7 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
 ///             url: "https://invalid.domain.xyz".to_string(),
 ///             file_path: PathBuf::from("doc.md"),
 ///         },
-///         status: StatusCode::NOT_FOUND,
+///         status: Some(StatusCode::NOT_FOUND),
 ///         error_message: Some("Not Found".to_string()),
 ///     }
 /// ];
@@ -271,21 +259,21 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
 pub fn format_check_results(results: &[CheckResult]) -> Vec<String> {
     results
         .iter()
-        .filter(|r| !r.status.is_success())
+        .filter(|r| !r.status.as_ref().is_some_and(|s| s.is_success()))
         .map(|r| {
-            let status_color = if r.status.is_redirection() {
-                r.status.to_string().yellow()
-            } else {
-                r.status.to_string().red()
+            let status_str = match r.status {
+                Some(code) if code.is_redirection() => code.to_string().yellow(),
+                Some(code) => code.to_string().red(),
+                None => "network error".to_string().red().bold(),
             };
 
             format!(
                 "- {} (Status: {}{}) [in file {}]",
                 r.link.url,
-                status_color,
+                status_str,
                 r.error_message
                     .as_ref()
-                    .map(|msg| format!(" - {}", msg))
+                    .map(|msg| format!(" - {msg}"))
                     .unwrap_or_default(),
                 r.link.file_path.display()
             )
@@ -306,7 +294,7 @@ mod tests {
         let mock_redirect = server
             .mock("GET", "/redirect")
             .with_status(301) // Permanent Redirect
-            .with_header("Location", &format!("{}/final", server_url))
+            .with_header("Location", &format!("{server_url}/final"))
             .create_async()
             .await;
 
@@ -318,7 +306,7 @@ mod tests {
             .await;
 
         let link_info = LinkInfo {
-            url: format!("{}/redirect", server_url),
+            url: format!("{server_url}/redirect"),
             file_path: PathBuf::from("test.md"),
         };
 
@@ -327,9 +315,9 @@ mod tests {
         assert_eq!(results.len(), 1);
         let result = &results[0];
 
-        assert_eq!(result.link.url, format!("{}/redirect", server_url));
-        assert!(result.status.is_success()); // Check if the final status was success
-        assert_eq!(result.status.as_u16(), 200); // Specifically check for 200 OK
+        assert_eq!(result.link.url, format!("{server_url}/redirect"));
+        assert!(result.status.is_some_and(|s| s.is_success()));
+        assert!(result.status.is_some_and(|s| s.as_u16() == 200));
 
         // Verify mocks were called
         mock_redirect.assert_async().await;
@@ -345,7 +333,7 @@ mod tests {
         let mock_redirect = server
             .mock("GET", "/redirect-error")
             .with_status(302) // Found (Temporary Redirect)
-            .with_header("Location", &format!("{}/notfound", server_url))
+            .with_header("Location", &format!("{server_url}/notfound"))
             .create_async()
             .await;
 
@@ -357,7 +345,7 @@ mod tests {
             .await;
 
         let link_info = LinkInfo {
-            url: format!("{}/redirect-error", server_url),
+            url: format!("{server_url}/redirect-error"),
             file_path: PathBuf::from("test.md"),
         };
 
@@ -366,12 +354,28 @@ mod tests {
         assert_eq!(results.len(), 1);
         let result = &results[0];
 
-        assert_eq!(result.link.url, format!("{}/redirect-error", server_url));
-        assert!(result.status.is_client_error()); // Check if the final status was a client error
-        assert_eq!(result.status.as_u16(), 404); // Specifically check for 404
+        assert_eq!(result.link.url, format!("{server_url}/redirect-error"));
+        assert!(result.status.is_some_and(|s| s.is_client_error()));
+        assert!(result.status.is_some_and(|s| s.as_u16() == 404));
 
         // Verify mocks were called
         mock_redirect.assert_async().await;
         mock_final.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_network_error_has_no_status() {
+        // Port 1 on localhost is virtually guaranteed to be closed
+        let link_info = LinkInfo {
+            url: "http://127.0.0.1:1/ping".to_string(),
+            file_path: PathBuf::from("test.md"),
+        };
+
+        let results = check_links(vec![link_info]).await;
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].status.is_none());
+        let message = results[0].error_message.as_deref().unwrap();
+        assert!(message.contains("Request failed"));
     }
 }

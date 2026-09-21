@@ -1,40 +1,26 @@
-use super::common::{LintContext, LintError, Rule};
+use super::common::{EventRule, LintError};
 use pulldown_cmark::{Event, Tag};
+use std::path::Path;
 
 pub struct NoEmptyLinksRule;
 
-impl Default for NoEmptyLinksRule {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl NoEmptyLinksRule {
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Rule for NoEmptyLinksRule {
+impl EventRule for NoEmptyLinksRule {
     fn id(&self) -> &'static str {
         "NO_EMPTY_LINKS"
     }
 
-    fn name(&self) -> &'static str {
-        "No Empty Links"
-    }
-
-    fn description(&self) -> &'static str {
-        "Ensures that all links have a non-empty URL"
-    }
-
-    fn check(&self, event: &Event<'_>, context: &LintContext) -> Option<LintError> {
+    fn check_event(
+        &self,
+        file_path: &Path,
+        event: &Event<'_>,
+        line_number: usize,
+    ) -> Option<LintError> {
         if let Event::Start(Tag::Link { dest_url, .. }) = event
             && dest_url.is_empty()
         {
             return Some(LintError {
-                file_path: context.file_path.to_path_buf(),
-                line: 0,
+                file_path: file_path.to_path_buf(),
+                line: line_number,
                 message: "Empty link URL found".to_string(),
                 rule_id: self.id().to_string(),
             });

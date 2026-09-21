@@ -15,7 +15,7 @@ struct Args {
     paths: Vec<PathBuf>,
 
     /// Skip link checking
-    #[arg(long, default_value = "false")]
+    #[arg(long)]
     skip_links: bool,
 }
 
@@ -54,17 +54,17 @@ async fn main() -> Result<()> {
     let mut all_links = Vec::new();
     let mut lint_errors = Vec::new();
 
-    // Analyze files
+    // Analyze files: a single parsing pass per file collects both lint errors
+    // and links to check
     for file_path in &markdown_files {
         println!("{} {}", "Analyzing".cyan(), file_path.display());
         match fs::read_to_string(file_path) {
             Ok(content) => {
-                let errors = linter::lint(&content, file_path);
-                lint_errors.extend(errors);
+                let analysis = linter::analyze(&content, file_path);
+                lint_errors.extend(analysis.lint_errors);
 
                 if !args.skip_links {
-                    let links = link_checker::extract_links(&content, file_path);
-                    all_links.extend(links);
+                    all_links.extend(analysis.links);
                 }
             }
             Err(e) => {
@@ -72,6 +72,8 @@ async fn main() -> Result<()> {
             }
         }
     }
+
+    let mut has_problems = false;
 
     // Check links if not skipped
     if !args.skip_links && !all_links.is_empty() {
@@ -83,6 +85,7 @@ async fn main() -> Result<()> {
             for error in formatted_errors {
                 println!("{}", error);
             }
+            has_problems = true;
         }
     }
 
@@ -98,6 +101,11 @@ async fn main() -> Result<()> {
                 error.message
             );
         }
+        has_problems = true;
+    }
+
+    // Non-zero exit code for CI when any problem was found
+    if has_problems {
         std::process::exit(1);
     }
 
