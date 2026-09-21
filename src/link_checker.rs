@@ -24,6 +24,13 @@ pub struct CheckResult {
 const MAX_RETRIES: u32 = 3;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 
+/// Some sites (Medium, Reddit, O'Reilly, ...) reply `403 Forbidden` to bots
+/// while being perfectly reachable for humans. Treat those as blocked rather
+/// than broken: they are reported but do not fail the run.
+fn is_bot_blocked(status: &StatusCode) -> bool {
+    status.as_u16() == 403
+}
+
 /// Asynchronously checks a list of extracted links by making HTTP requests.
 ///
 /// This function uses a concurrent stream to verify the status of each URL.
@@ -90,12 +97,13 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                 let result = check_single_link(&client, link.clone()).await;
                 let current = counter.fetch_add(1, Ordering::Relaxed) + 1;
 
+                let is_success = result.status.as_ref().is_some_and(|code| code.is_success());
+                let is_blocked = result.status.as_ref().is_some_and(is_bot_blocked);
+
                 let status_str = match result.status {
-                    Some(code) => match code.as_u16() {
-                        200..=299 => code.to_string().green(),
-                        300..=399 => code.to_string().yellow(),
-                        _ => code.to_string().red(),
-                    },
+                    Some(code) if is_success => code.to_string().green(),
+                    Some(code) if is_blocked => code.to_string().yellow(),
+                    Some(code) => code.to_string().red(),
                     None => "network error".to_string().red().bold(),
                 };
 
@@ -105,10 +113,17 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                         .map(|code| code.to_string())
                         .unwrap_or_else(|| "network error".to_string());
 
-                    if result.status.as_ref().is_some_and(|code| code.is_success()) {
+                    if is_success {
                         println!(
                             "::debug::Link {} status: {} (success)",
                             link.url, status_text
+                        );
+                    } else if is_blocked {
+                        println!(
+                            "::warning file={}::Link {} is bot-protected ({}), skipping",
+                            link.file_path.display(),
+                            link.url,
+                            status_text
                         );
                     } else {
                         println!(
@@ -124,17 +139,16 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
                         );
                     }
                 } else {
+                    let verdict = if is_success {
+                        "GOOD".green()
+                    } else if is_blocked {
+                        "BLOCKED".yellow()
+                    } else {
+                        "FAIL".red()
+                    };
                     println!(
                         "[{}/{}] {} - {} - {}",
-                        current,
-                        total_links,
-                        status_str,
-                        if result.status.as_ref().is_some_and(|code| code.is_success()) {
-                            "GOOD".green()
-                        } else {
-                            "FAIL".red()
-                        },
-                        link.url
+                        current, total_links, status_str, verdict, link.url
                     );
                 }
                 result
@@ -157,10 +171,14 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
         .iter()
         .filter(|r| r.status.as_ref().is_some_and(|s| s.is_redirection()))
         .count();
+    let blocked = results
+        .iter()
+        .filter(|r| r.status.as_ref().is_some_and(is_bot_blocked))
+        .count();
     let failed = results
         .iter()
         .filter(|r| match r.status {
-            Some(s) => s.is_client_error() || s.is_server_error(),
+            Some(s) => (s.is_client_error() || s.is_server_error()) && !is_bot_blocked(&s),
             None => true, // network errors count as failures
         })
         .count();
@@ -174,6 +192,9 @@ pub async fn check_links(links: Vec<LinkInfo>) -> Vec<CheckResult> {
     println!("{}: {}", "Successful".green(), successful);
     if redirects > 0 {
         println!("{}: {}", "Redirects".yellow(), redirects);
+    }
+    if blocked > 0 {
+        println!("{}: {}", "Blocked (bot-protected)".yellow(), blocked);
     }
     if failed > 0 {
         println!("{}: {}", "Failed".red(), failed);
@@ -230,8 +251,9 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
 
 /// Formats the results of link checks into human-readable error messages.
 ///
-/// It filters out successful requests and returns formatted strings for
-/// broken links, client errors, or network failures.
+/// It filters out successful requests and bot-blocked responses (403) and
+/// returns formatted strings for broken links, client errors, or network
+/// failures.
 ///
 /// # Examples
 ///
@@ -259,10 +281,15 @@ async fn check_single_link(client: &Client, link: LinkInfo) -> CheckResult {
 pub fn format_check_results(results: &[CheckResult]) -> Vec<String> {
     results
         .iter()
-        .filter(|r| !r.status.as_ref().is_some_and(|s| s.is_success()))
+        .filter(|r| {
+            !r.status
+                .as_ref()
+                .is_some_and(|s| s.is_success() || is_bot_blocked(s))
+        })
         .map(|r| {
             let status_str = match r.status {
                 Some(code) if code.is_redirection() => code.to_string().yellow(),
+                Some(code) if is_bot_blocked(&code) => code.to_string().yellow(),
                 Some(code) => code.to_string().red(),
                 None => "network error".to_string().red().bold(),
             };
@@ -361,6 +388,34 @@ mod tests {
         // Verify mocks were called
         mock_redirect.assert_async().await;
         mock_final.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_403_is_blocked_not_failed() {
+        let mut server = mockito::Server::new_async().await;
+        let server_url = server.url();
+
+        // Many sites reply 403 to bots while being perfectly reachable
+        let mock = server
+            .mock("GET", "/protected")
+            .with_status(403) // Forbidden
+            .create_async()
+            .await;
+
+        let link_info = LinkInfo {
+            url: format!("{server_url}/protected"),
+            file_path: PathBuf::from("test.md"),
+        };
+
+        let results = check_links(vec![link_info]).await;
+
+        assert_eq!(results.len(), 1);
+        assert!(results[0].status.is_some_and(|s| s.as_u16() == 403));
+
+        // 403 must not be reported as a problem (exit code stays 0)
+        assert!(format_check_results(&results).is_empty());
+
+        mock.assert_async().await;
     }
 
     #[tokio::test]

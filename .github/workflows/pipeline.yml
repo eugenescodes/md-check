@@ -79,4 +79,6 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Verify container startup and dependency compatibility
-        run: docker run --rm md-check:ci-test .
+        run: >-
+          docker run --rm -v "${{ github.workspace }}:/repo" md-check:ci-test
+          /repo --exclude /repo/test-md-files --exclude /repo/test-cases.md

@@ -22,10 +22,12 @@ jobs:
 
       - name: Check code formatting
         run: cargo fmt --all -- --check
-        continue-on-error: true
+
+      - name: Run clippy (Rust linter)
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Install md-check
         run: cargo install --path .
 
       - name: Check Markdown files
-        run: md-check .
+        run: md-check . --exclude test-md-files --exclude test-cases.md

@@ -67,3 +67,28 @@ fn test_invalid_file_path() -> Result<(), Box<dyn Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_exclude_flag() -> Result<(), Box<dyn Error>> {
+    let temp_dir = TempDir::new()?;
+
+    let include_dir = temp_dir.path().join("docs");
+    let exclude_dir = temp_dir.path().join("fixtures");
+    fs::create_dir(&include_dir)?;
+    fs::create_dir(&exclude_dir)?;
+    fs::write(include_dir.join("included.md"), "# Included")?;
+    fs::write(exclude_dir.join("excluded.md"), "# Excluded")?;
+
+    cargo_bin_cmd!("md-check")
+        .arg(temp_dir.path())
+        .arg("--exclude")
+        .arg(&exclude_dir)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Found 1 Markdown files")
+                .and(predicate::str::contains("excluded.md").not()),
+        );
+
+    Ok(())
+}

@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use colored::*;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use md_check::link_checker;
 use md_check::linter;
@@ -14,15 +14,30 @@ struct Args {
     #[arg(required = true)]
     paths: Vec<PathBuf>,
 
+    /// Paths (files or directories) to exclude from checking
+    #[arg(long = "exclude", value_name = "PATH")]
+    excludes: Vec<PathBuf>,
+
     /// Skip link checking
     #[arg(long)]
     skip_links: bool,
+}
+
+/// Removes `./` components so that relative and absolute-ish paths compare
+/// consistently (e.g. `./test-md-files/x.md` vs `test-md-files`).
+fn normalize(path: &Path) -> PathBuf {
+    path.components()
+        .filter(|component| !matches!(component, Component::CurDir))
+        .collect()
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
     let mut markdown_files = Vec::new();
+
+    let excludes: Vec<PathBuf> = args.excludes.iter().map(|path| normalize(path)).collect();
+    let is_excluded = |path: &Path| excludes.iter().any(|ex| normalize(path).starts_with(ex));
 
     // Find all Markdown files
     for path in args.paths {
@@ -32,10 +47,14 @@ async fn main() -> Result<()> {
                 .filter_map(Result::ok)
                 .filter(|e| !e.file_type().is_dir())
                 .filter(|e| e.path().extension().is_some_and(|ext| ext == "md"))
+                .filter(|e| !is_excluded(e.path()))
             {
                 markdown_files.push(entry.path().to_path_buf());
             }
-        } else if path.is_file() && path.extension().is_some_and(|ext| ext == "md") {
+        } else if path.is_file()
+            && path.extension().is_some_and(|ext| ext == "md")
+            && !is_excluded(&path)
+        {
             markdown_files.push(path);
         }
     }

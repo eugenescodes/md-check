@@ -1,6 +1,7 @@
 # Markdown Link Checker
 
-A command-line tool that validates markdown files by checking for broken links and applying linting rules.
+A command-line tool that validates markdown files by checking for broken links
+and applying linting rules.
 
 ## Features
 
@@ -14,6 +15,8 @@ A command-line tool that validates markdown files by checking for broken links a
 - Supports multiple files and directories
 - Supports GitHub action and pre-commit
 - CI-friendly: exits with a non-zero code when broken links or style errors are found
+- Links that reply 403 (bot-protected sites like Medium or Reddit) are reported
+  as `BLOCKED` and do not fail the run
 - TLS via rustls (no OpenSSL dependency)
 
 ## Installation
@@ -59,6 +62,10 @@ md-check ./folder_name_1/ ./folder_name_2/
 # Skip link checking
 
 md-check --skip-links README.md
+
+# Exclude files or directories from checking
+
+md-check . --exclude test-md-files --exclude test-cases.md
 ```
 
 Output
@@ -149,7 +156,6 @@ src/
 ├── link_checker.rs  # Link checking functionality
 └── linter.rs        # Markdown linting rules
 
-
 # Run anc check test markdown file
 
 cargo run -- test-cases.md
@@ -171,8 +177,10 @@ cargo build --release
 
 During the development of this project, I was inspired by the following excellent projects:
 
-- [markdownlint](https://github.com/DavidAnson/markdownlint) - a tool for checking the style and formatting of Markdown files
-- [lychee](https://github.com/lycheeverse/lychee/) - a fast link-checking tool written in Rust
+- [markdownlint](https://github.com/DavidAnson/markdownlint) - a tool for checking
+  the style and formatting of Markdown files
+- [lychee](https://github.com/lycheeverse/lychee/) - a fast link-checking tool
+  written in Rust
 
 ## License
 
